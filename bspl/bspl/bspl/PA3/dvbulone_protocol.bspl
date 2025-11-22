@@ -1,0 +1,23 @@
+protocol TransactionProtocol {
+    roles Customer, Vendor
+    parameters out ID key, out item, out price, out confirmation, out decision, out outcome
+    private payment, paymentinfo, shipment, address, return_flag
+
+    // Transaction initial comms.
+    Customer -> Vendor : order [out ID key, out item, out price]
+    Vendor -> Customer : confirm [in ID, in item, in price, out confirmation]
+    
+    // Independent comms determined by cancellation or purchase.
+    Customer -> Vendor : purchase [in ID, in confirmation, nil decision, out address, out paymentinfo, out payment, out decision]
+    Customer -> Vendor : cancel [in ID, in confirmation, nil payment, out decision]
+    
+    // Step following a purchase.
+    Vendor -> Customer : ship [in ID, in payment, out shipment]
+    
+    // End: Delivery, return & return confirmed, and completion of return.
+    Vendor -> Customer : complete_delivery [in ID, in shipment, nil return_flag, out outcome]
+    Customer -> Vendor : return [in ID, in shipment, nil outcome, out return_flag]
+    Vendor -> Customer : complete_cancellation [in ID, in decision, nil shipment, out outcome]
+    Vendor -> Customer : complete_return [in ID, in return_flag, out outcome]
+}
+

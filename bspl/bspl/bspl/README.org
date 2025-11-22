@@ -1,0 +1,327 @@
+* BSPL
+BSPL stands for the Blindingly Simple Protocol Language.
+
+This repository provides tools for working with the language, including a parser and verification tools (proving safety, liveness, etc.)
+It also provides a library for implementing agents that can enact BSPL protocols.
+
+** Installation
+BSPL may eventually be made available through the PyPI package registry, but for now install it directly from github.
+
+*** Prerequisites
+BSPL requires python version 3.4 or later.
+On Windows, Python 3.6+ is recommended.
+
+*** Install from source (Gitlab)
+1. Download the source code from gitlab:
+  #+begin_example
+  $ git clone https://gitlab.com/masr/bspl.git
+  #+end_example
+2. Optionally create virtual environment for BSPL
+  #+begin_example
+  $ python -m venv venv
+  #+end_example
+3. Activate virtual environment (do this whenever you start a new shell session)
+  - Linux:
+    #+begin_example
+    $ . venv/bin/activate
+    #+end_example
+  - Windows:
+    #+begin_example
+    $ venv\Scripts\activate.bat # or venv\Scripts\Activate.ps1 in PowerShell
+    #+end_example
+    If you get an error on Windows because running script is disabled, you can fix it by running the following command:
+    #+begin_example PowerShell
+    $ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Unrestricted
+    #+end_example
+3. Install package in development mode
+  #+begin_example
+  $ pip install -e ./bspl # or . if inside the bspl directory
+  #+end_example
+
+
+** Usage
+   When installed globally, BSPL provides the 'bspl' entrypoint, that can be used as follows:
+
+   #+begin_example
+SYNOPSIS
+    bspl GROUP | COMMAND - (Alternatively, python -m bspl.main on Windows)
+
+GROUPS
+    GROUP is one of the following:
+
+     generate
+
+     verify
+
+COMMANDS
+    COMMAND is one of the following:
+
+     ast
+       Print the parsed AST for the specification in PATH
+
+     json
+       Print a JSON representation of each protocol
+
+     check-syntax
+       Parse each file, printing any syntax errors found
+
+     load-file
+       Load a BSPL file, returning a Specification object containing one or more protocols
+   #+end_example
+
+   The CLI is implemented using the ~Fire~ library, which means that each command supports the "-h" help option to list the possible arguments.
+   Grouped commands, such as those under ~sat~, may inherit arguments from their parent, so check both.
+
+   ~Fire~ enables inspection and chaining of function results, such as with the ~load-file~ command for loading a specification.
+   After the specification is loaded, you can inspect its contents and call methods on them, etc.
+
+   ~Fire~ can also launch a python shell with various objects available via ~--interactive~.
+   For example, try ~bspl load-file samples/bspl/purchase protocols Purchase--interactive~, and you should get a python REPL with the Purchase protocol loaded in the ~result~ variable.
+
+   There are some example protocol files in the 'samples' directory.
+
+*** Notes
+   - There are probably still some bugs. If you find a case that doesn't work as you expect, please submit an issue.
+   - For easier testing of listings used in latex papers, BSPL will automatically strip some latex formatting before parsing a protocol, so they should work without modification.
+
+** Implementing Agents
+This repository provides a /protocol adapter/ for implementing agents that play roles in a BSPL protocol.
+
+You can run the scenario implementation using the ~start.sh~ script to launch all of the agents at the same time; press any key to kill them and stop the run.
+
+*** Specifying the Protocol
+Our tutorial will follow the Logistics scenario, visible in the scenarios directory.
+
+The protocol could be provided as an object in the python code directly, but it is generally easier to specify it as a separate BSPL file and then load it in the agent.
+The protocol we will be using is as follows, given in logistics.bspl:
+#+begin_src bspl
+Logistics {
+  roles Merchant, Wrapper, Labeler, Packer
+  parameters out orderID key, out itemID key, out item, out status
+  private address, label, wrapping, remID, ackID
+
+  Merchant -> Labeler: RequestLabel[out orderID key, out address]
+  Merchant -> Wrapper: RequestWrapping[in orderID key, out itemID key, out item]
+
+  Wrapper -> Packer: Wrapped[in orderID key, in itemID key, in item, out wrapping]
+  Labeler -> Packer: Labeled[in orderID key, in address, out label]
+
+  Packer -> Merchant: Packed[in orderID key, in itemID key, in item, in wrapping, in label, out status]
+}
+#+end_src
+
+This protocol describes roles for four agents, each of which can be implemented either using Python decorators or AgentSpeak (ASL).
+
+*** Loading and Configuring the Protocol
+First, load the protocol and export it as a module:
+#+begin_src python
+import bspl
+logistics = bspl.load_file("logistics.bspl").export("Logistics")
+from Logistics import Merchant, Wrapper, Labeler, Packer
+from Logistics import RequestLabel, RequestWrapping, Packed
+#+end_src
+
+*** Configuring the Agent
+After loading its protocol, role, and possibly messages, each agent will need to be configured with information about how to connect to the other agents.
+
+In the logistics scenario, all of this is done in a common configuration.py file that can be loaded by all four of the agents, but they could be configured separately.
+
+#+begin_src python
+agents = {
+    "Merchant": [("127.0.0.1", 8000)],
+    "Wrapper": [("127.0.0.1", 8001)],
+    "Labeler": [("127.0.0.1", 8002)],
+    "Packer": [("127.0.0.1", 8003)],
+}
+
+systems = {
+    "logistics": {
+        "protocol": logistics,
+        "roles": {
+            Merchant: "Merchant",
+            Wrapper: "Wrapper",
+            Labeler: "Labeler",
+            Packer: "Packer",
+        },
+    },
+}
+#+end_src
+The role binding configuration is a single dictionary mapping roles to tuples containing (IP, port) pairs.
+They don't all have to be on the same machine, but in this example we are running them all on localhost (127.0.0.1)
+The configuration that each agent sees for itself identifies what IP address and port it should listen on; 127.0.0.1 is chosen here so that they listen on all IPs known to the host networking system.
+
+*** Implementing Agent Behavior
+There are two approaches to implementing agent behavior in BSPL:
+
+**** Approach 1: Using Python Decorators
+This approach is straightforward for request-response patterns and is used in the logistics scenario.
+
+***** Setting up the Agent
+First, create the basic agent structure:
+
+#+begin_src python
+from bspl.adapter import Adapter
+from configuration import systems, agents
+from Logistics import RequestLabel, RequestWrapping, Packed
+
+adapter = Adapter("Merchant", systems, agents)
+logger = logging.getLogger("merchant")
+if __name__ == "__main__":
+    print("Starting Merchant...")
+    adapter.start()
+#+end_src
+
+***** Acting Proactively
+To start an enactment of a protocol, some agent will have to make the first move. In Logistics, that's the Merchant, who requests the wrapping and labeling of the items in an order. This can be seen from the first message in the protocol, RequestLabel, which has all its parameters labeled ~out~, which means it has no dependencies and can be sent at will.
+
+#+begin_src python
+async def order_generator():
+    """Generates sample orders."""
+    for orderID in range(10):
+        await adapter.send(
+            RequestLabel(
+                orderID=orderID,
+                address=random.choice(["Lancaster University", "NCSU"]),
+            )
+        )
+        for i in range(2):
+            await adapter.send(
+                RequestWrapping(
+                    orderID=orderID,
+                    itemID=i,
+                    item=random.choice(["ball", "bat", "plate", "glass"]),
+                )
+            )
+        await asyncio.sleep(0)
+#+end_src
+
+A lot of new things here:
+- The function is asynchronous, to work with the adapter
+- Messages are constructed by passing in their parameters as keyword arguments
+- The resulting message instances are sent with ~adapter.send(message)~
+- There's an ~asyncio.sleep(0)~ step near the end to make sure it doesn't all happen instantly
+
+***** Adding a Reactor
+In most protocols, not all messages are sent independently. Instead, many have dependencies and may follow a simple request/response pattern. We can handle these using a reactor:
+
+#+begin_src python
+@adapter.reaction(Packed)
+async def packed(msg):
+    """Handle packed items."""
+    logger.info(f"Order {msg['orderID']} item {msg['itemID']} packed with status: {msg['status']}")
+    return msg
+
+if __name__ == "__main__":
+    adapter.start(order_generator())
+#+end_src
+
+The reactor is registered using the ~@adapter.reaction~ decorator and is called whenever a matching message is received. The message instance is passed as a parameter, containing all the message's data.
+
+**** Approach 2: Using AgentSpeak (ASL)
+For more complex behaviors with interdependent states, you can use ASL files. The BSPL compiler can generate ASL templates for your protocol:
+
+#+begin_src bash
+python -m bspl.main generate asl logistics.bspl --all_roles
+#+end_src
+
+This generates basic ASL files that need to be enhanced with business logic. Here's an example of the generated vs. working code for the Wrapper role:
+
+Generated template:
+#+begin_src asl
++request_wrapping(MasID, Merchant, Wrapper, OrderID, ItemID, Item)
+  <- // insert code to compute Wrapped out parameters ['wrapping'] here
+     .emit(wrapped(MasID, Wrapper, Packer, OrderID, ItemID, Item, Wrapping)).
+#+end_src
+
+Working implementation:
+#+begin_src asl
++request_wrapping(System, Merchant, Wrapper, OrderID, ItemID, Item)
+  <- // Generate wrapping based on item
+     if (Item == "ball") {
+       Wrapping = "box"
+     } else {
+       if (Item == "bat") {
+         Wrapping = "tube"
+       } else {
+         if (Item == "plate") {
+           Wrapping = "bubble wrap"
+         } else {
+           Wrapping = "foam"
+         }
+       }
+     };
+     .print("Wrapper: Using ", Wrapping, " for item ", Item, " (Order ", OrderID, ")");
+     .emit(wrapped(System, Wrapper, "Packer", OrderID, ItemID, Item, Wrapping)).
+#+end_src
+
+Key changes needed to make generated ASL files work:
+1. Replace ~MasID~ with ~System~ for protocol identification
+2. Add concrete business logic to compute output parameters
+3. Use string literals for known role names (e.g., ~"Packer"~)
+4. Add logging for better visibility of the protocol execution
+
+***** Setting up an ASL Agent
+The Python code for an ASL agent is much simpler than the decorator approach:
+
+#+begin_src python
+from bspl.adapter import Adapter
+from configuration import systems, agents
+
+adapter = Adapter("Wrapper", systems, agents)
+adapter.load_asl("wrapper.asl")
+
+if __name__ == "__main__":
+    print("Starting Wrapper...")
+    adapter.start()
+#+end_src
+
+***** Complex Coordination Example
+The Packer role demonstrates how ASL handles complex coordination between multiple messages:
+
+#+begin_src asl
+// Handle wrapped item
++wrapped(System, Wrapper, Packer, OrderID, ItemID, Item, Wrapping)
+  : labeled(System, Labeler, Packer, OrderID, Address, Label)
+  <- !send_packed(System, Packer, "Merchant", OrderID, ItemID, Item, Wrapping, Label).
+
+// Handle labeled item
++labeled(System, Labeler, Packer, OrderID, Address, Label)
+  : wrapped(System, Wrapper, Packer, OrderID, ItemID, Item, Wrapping)
+  <- !send_packed(System, Packer, "Merchant", OrderID, ItemID, Item, Wrapping, Label).
+
+// Send packed item
++!send_packed(System, Packer, Merchant, OrderID, ItemID, Item, Wrapping, Label)
+  <- // Generate status based on wrapping and label
+     if (Wrapping == "box" & Label == "UK-LANCS-001") {
+       Status = "ready for UK shipping"
+     } else {
+       if (Wrapping == "box" & Label == "US-NCSU-001") {
+         Status = "ready for US shipping"
+       } else {
+         Status = "ready for shipping"
+       }
+     };
+     .print("Packer: Item ", Item, " from order ", OrderID, " is ", Status);
+     .emit(packed(System, Packer, Merchant, OrderID, ItemID, Item, Wrapping, Label, Status)).
+#+end_src
+
+The Packer waits for both ~wrapped~ and ~labeled~ messages before sending the ~packed~ message, using ASL's context conditions (~:~) to ensure proper synchronization.
+
+*** Choosing an Approach
+- Use Python decorators (like in logistics/) when:
+  - You have simple request-response patterns
+  - You want straightforward, procedural code
+  - You need to integrate with Python libraries
+
+- Use ASL files (like in grading/) when:
+  - You need complex rule-based behavior
+  - Your agent has many interdependent states
+  - You want a more declarative programming style
+
+*** Running the Scenario
+The ~start.sh~ script launches all agents:
+#+begin_src bash
+./start.sh
+#+end_src
+
+This will start all agents and begin processing orders. Press any key to stop the scenario.

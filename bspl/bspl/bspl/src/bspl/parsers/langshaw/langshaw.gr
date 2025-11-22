@@ -1,0 +1,46 @@
+@@eol_comments :: /#[^\n]*\n/
+@@whitespace :: None
+@@keyword :: who what do sayso nono nogo
+
+document = {'\n'} @:name {{/\s/} @:block {/\s/}}+ $;
+
+name = {' '} name:spacename {' '};
+
+block =
+       | who:who
+       | what:what
+       | actions:action_block
+       | conflicts:conflicts
+       | nogos:nogos
+       | saysos:saysos
+       ;
+
+who = 'who' [':'] S @:roles;
+roles = ','.{role} ;
+role = @:word ;
+
+what = 'what' [':'] S @:','.{clause};
+clause = 'or'.{param};
+param = name:word [key:'key'];
+
+action_block = 'do' [':'] S @:{action}+;
+action = {' '} actor:word ':' {' '} ~ name:word '(' parameters:params ')' {S} ;
+params = ','.{word};
+
+conflicts = 'nono' [':'] S @:{conflict}+ S;
+conflict = {' '} @:{word}+ {'\n'};
+
+nogos = 'nogo' [':'] S @:{nogo}+ S;
+nogo = {' '} @+:word '-/>' @+:word {'\n'};
+
+saysos = 'sayso' [':'] S @:{sayso}+;
+sayso = {' '} roles:priority ':' parameters:params S;
+priority = '>'.{role} ;
+
+@name
+word = {' '} @:/[\w@-]*\w/ {' '};
+
+@name
+spacename = /[ \w@-]+/ ;
+
+S = [{' '} '\n'];

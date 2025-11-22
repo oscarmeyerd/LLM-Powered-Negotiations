@@ -1,0 +1,32 @@
+@@eol_comments :: ?/(?m)(#|//)[^\n]*/?
+
+document = {protocol ~ }+ $;
+
+protocol = type:`protocol` ('protocol' | ()) name:spacename '{' ~
+  'roles' roles:roles
+  'parameters' parameters:params
+  (('private' private:params) | ())
+  references:references
+'}';
+
+roles = ','.{role} ;
+role = name:word ;
+
+params = ','.{param} ;
+param = [adornment:protocol_adornment] name:word [key:'key'];
+protocol_adornment = 'out' | 'in' | 'nil' | 'any' | 'opt' ;
+
+message_params = ','.{message_param} ;
+message_param = [adornment:message_adornment] name:word [key:'key'];
+message_adornment = 'out' | 'in' | 'nil' ;
+
+references = { message | ref } ;
+
+ref = type:`protocol` name:spacename '(' ~ [roles:roles '|'] params:params ')' ;
+
+message = type:`message` sender:word ('->'|'→'|'↦') ~ recipients:recipient_list [':'] name:word ('[' parameters:message_params ']' | ());
+
+recipient_list = ','.{word};
+
+word = /[\w@>-]+/ ;
+spacename = /[ \w@-]+/ ;

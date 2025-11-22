@@ -1,0 +1,14 @@
+Negotiation {
+  roles AgentA, AgentB
+  parameters out ID key, out resource_type, out quantity, out utility_value, out outcome
+  private offer_value, counter_value, negotiation_round
+
+  AgentA -> AgentB: propose[out ID, out resource_type, out quantity, out offer_value]
+  AgentB -> AgentA: counter[in ID, in resource_type, in quantity, out counter_value, out negotiation_round]
+  
+  AgentA -> AgentB: accept[in ID, in resource_type, in quantity, in counter_value, out utility_value]
+  AgentA -> AgentB: reject[in ID, in resource_type, in quantity, in counter_value, out outcome]
+  
+  AgentB -> AgentA: final_accept[in ID, in resource_type, in quantity, in offer_value, out utility_value]
+  AgentB -> AgentA: final_reject[in ID, in resource_type, in quantity, in offer_value, out outcome]
+}

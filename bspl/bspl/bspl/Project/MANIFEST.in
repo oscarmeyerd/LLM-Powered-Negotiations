@@ -1,0 +1,3 @@
+include *.md *.bspl *.ps1 *.env
+recursive-include src *.py *.gr
+include setup.py setup.cfg pyproject.toml
